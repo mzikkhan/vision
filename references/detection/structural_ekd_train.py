@@ -1,22 +1,4 @@
-r"""PyTorch Detection Structural Ensemble Knowledge Distillation.
-
-To run in a multi-gpu environment, use the distributed launcher::
-
-    python -m torch.distributed.launch --nproc_per_node=$NGPU --use_env \
-        train.py ... --world-size $NGPU
-
-The default hyperparameters are tuned for training on 8 gpus and 2 images per gpu.
-    --lr 0.02 --batch-size 2 --world-size 8
-If you use different number of gpus, the learning rate should be changed to 0.02/8*$NGPU.
-
-On top of that, for training Faster/Mask R-CNN, the default hyperparameters are
-    --epochs 26 --lr-steps 16 22 --aspect-ratio-group-factor 3
-
-Also, if you train Keypoint R-CNN, the default hyperparameters are
-    --epochs 46 --lr-steps 36 43 --aspect-ratio-group-factor 3
-Because the number of images is smaller in the person keypoint subset of COCO,
-the number of epochs should be adapted so that we have the same number of iterations.
-"""
+r"""PyTorch Detection Structural Ensemble Knowledge Distillation."""
 import datetime
 import os
 import time
@@ -72,16 +54,29 @@ def get_transform(is_train, args):
 def get_args_parser(add_help=True):
     import argparse
 
-    parser = argparse.ArgumentParser(description="PyTorch Detection Training", add_help=add_help)
+    parser = argparse.ArgumentParser(description="PyTorch Detection Training: Ensemble Structural Knowledge Distillation", add_help=add_help)
 
-    parser.add_argument("--data-path", default="/data/coco", type=str, help="dataset path")
+    # Loading dataset
+    parser.add_argument("--data-path", default="content/dataset/coco", type=str, help="dataset path")
     parser.add_argument(
         "--dataset",
         default="coco",
         type=str,
         help="dataset name. Use coco for object detection and instance segmentation and coco_kp for Keypoint detection",
     )
-    parser.add_argument("--model", default="maskrcnn_resnet50_fpn", type=str, help="model name")
+
+    # EKD parts
+    ## Taking input of teacher models
+    parser.add_argument("--teacher1", default="maskrcnn_resnet50_fpn", type=str, help="teacher1 model name")
+    parser.add_argument("--teacher2", default="maskrcnn_resnet50_fpn", type=str, help="teacher2 model name")
+    parser.add_argument("--teacher3", default="maskrcnn_resnet50_fpn", type=str, help="teacher3 model name")
+
+    ## Taking input of student models
+    parser.add_argument("--student1", default="maskrcnn_resnet50_fpn", type=str, help="student1 model name")
+    parser.add_argument("--student2", default="maskrcnn_resnet50_fpn", type=str, help="student2 model name")
+    parser.add_argument("--student3", default="maskrcnn_resnet50_fpn", type=str, help="student3 model name")
+
+    # Training Hyperparameters
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(
         "-b", "--batch-size", default=2, type=int, help="images per gpu, the total batch size is $NGPU x batch_size"
@@ -130,7 +125,10 @@ def get_args_parser(add_help=True):
         "--lr-gamma", default=0.1, type=float, help="decrease lr by a factor of lr-gamma (multisteplr scheduler only)"
     )
     parser.add_argument("--print-freq", default=20, type=int, help="print frequency")
+
+    ## Directory to save outputs
     parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
+    
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
     parser.add_argument("--start_epoch", default=0, type=int, help="start epoch")
     parser.add_argument("--aspect-ratio-group-factor", default=3, type=int)
@@ -161,8 +159,22 @@ def get_args_parser(add_help=True):
     # distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
     parser.add_argument("--dist-url", default="env://", type=str, help="url used to set up distributed training")
-    parser.add_argument("--weights", default=None, type=str, help="the weights enum name to load")
-    parser.add_argument("--weights-backbone", default=None, type=str, help="the backbone weights enum name to load")
+
+    # weights
+    parser.add_argument("--weights_s1", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s2", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s3", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t1", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t2", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t3", default=None, type=str, help="the weights enum name to load")
+
+    parser.add_argument("--weights-backbone_s1", default=None, type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s2", default=None, type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s3", default=None, type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t1", default=None, type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t2", default=None, type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t3", default=None, type=str, help="the backbone weights enum name to load")
+
 
     # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")
@@ -236,31 +248,49 @@ def main(args):
         dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers, collate_fn=utils.collate_fn
     )
 
-    print("Creating model")
+    print("Creating teacher model")
+
     kwargs = {"trainable_backbone_layers": args.trainable_backbone_layers}
+
     if args.data_augmentation in ["multiscale", "lsj"]:
         kwargs["_skip_resize"] = True
     if "rcnn" in args.model:
         if args.rpn_score_thresh is not None:
             kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
-    ## Creating the model
-    model = torchvision.models.get_model(
-        args.model, weights=args.weights, weights_backbone=args.weights_backbone, num_classes=num_classes, **kwargs
+    ## Creating the models
+    student1 = torchvision.models.get_model(
+        args.student1, weights=args.weights_s1, weights_backbone=args.weights_backbone_s1, num_classes=num_classes, **kwargs
     )
-    model.to(device)
-    if args.distributed and args.sync_bn:
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    student2 = torchvision.models.get_model(
+        args.student2, weights=args.weights_s2, weights_backbone=args.weights_backbone_s2, num_classes=num_classes, **kwargs
+    )
+    student3 = torchvision.models.get_model(
+        args.student3, weights=args.weights_s3, weights_backbone=args.weights_backbone_s3, num_classes=num_classes, **kwargs
+    )
+    teacher1 = torchvision.models.get_model(
+        args.teacher1, weights=args.weights_t1, weights_backbone=args.weights_backbone_t1, num_classes=num_classes, **kwargs
+    )
+    teacher2 = torchvision.models.get_model(
+        args.teacher2, weights=args.weights_t2, weights_backbone=args.weights_backbone_t2, num_classes=num_classes, **kwargs
+    )
+    teacher3 = torchvision.models.get_model(
+        args.teacher3, weights=args.weights_t3, weights_backbone=args.weights_backbone_t3, num_classes=num_classes, **kwargs
+    )
 
-    model_without_ddp = model
+    student1.to(device)
+    if args.distributed and args.sync_bn:
+        student1 = torch.nn.SyncBatchNorm.convert_sync_batchnorm(student1)
+
+    student1_without_ddp = student1
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
-        model_without_ddp = model.module
+       student1 = torch.nn.parallel.DistributedDataParallel(student1, device_ids=[args.gpu])
+       student1_without_ddp = student1.module
 
     if args.norm_weight_decay is None:
-        parameters = [p for p in model.parameters() if p.requires_grad]
+        parameters = [p for p in student1.parameters() if p.requires_grad]
     else:
-        param_groups = torchvision.ops._utils.split_normalization_params(model)
+        param_groups = torchvision.ops._utils.split_normalization_params(student1)
         wd_groups = [args.norm_weight_decay, args.weight_decay]
         parameters = [{"params": p, "weight_decay": w} for p, w in zip(param_groups, wd_groups) if p]
 
@@ -292,7 +322,7 @@ def main(args):
 
     if args.resume:
         checkpoint = torch.load(args.resume, map_location="cpu")
-        model_without_ddp.load_state_dict(checkpoint["model"])
+        student1_without_ddp.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
         args.start_epoch = checkpoint["epoch"] + 1
@@ -301,32 +331,37 @@ def main(args):
 
     if args.test_only:
         torch.backends.cudnn.deterministic = True
-        evaluate(model, data_loader_test, device=device)
+        evaluate(student1, data_loader_test, device=device)
         return
 
+    ## Training loop
     print("Start training")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq, scaler)
+        ## Calling the train step
+        train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, optimizer, data_loader, device, epoch, args.print_freq, scaler)
         lr_scheduler.step()
         if args.output_dir:
+            ## Creating checkpoint
             checkpoint = {
-                "model": model_without_ddp.state_dict(),
+                "model": student1_without_ddp.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "lr_scheduler": lr_scheduler.state_dict(),
                 "args": args,
                 "epoch": epoch,
             }
+            ## Saving weights to output_dir
             if args.amp:
                 checkpoint["scaler"] = scaler.state_dict()
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
-        # evaluate after every epoch
-        evaluate(model, data_loader_test, device=device)
+        # evaluate student1 after every epoch
+        evaluate(student1, data_loader_test, device=device)
 
+    ## Calculating training time
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print(f"Training time {total_time_str}")

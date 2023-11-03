@@ -9,8 +9,17 @@ from coco_eval import CocoEvaluator
 from coco_utils import get_coco_api_from_dataset
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, scaler=None):
-    model.train()
+def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, optimizer, data_loader, device, epoch, print_freq, scaler=None):
+    # Setting students to training mode
+    student1.train()
+    student2.train()
+    student3.train()
+
+    # Setting teachers to evaluation mode
+    teacher1.eval()
+    teacher2.eval()
+    teacher3.eval()
+
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
     header = f"Epoch: [{epoch}]"
@@ -28,7 +37,18 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, sc
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
         with torch.cuda.amp.autocast(enabled=scaler is not None):
-            loss_dict = model(images, targets)
+
+            # Extracting teacher features
+            features_t1 = teacher1(images)
+            features_t2 = teacher2(images)
+            features_t3 = teacher3(images)
+
+            # Extracting student features
+            features_s1 = student1(images)
+            features_s2 = student2(images)
+            features_s3 = student3(images)
+
+            loss_dict = student1(images, targets)
             losses = sum(loss for loss in loss_dict.values())
 
         # reduce losses over all GPUs for logging purposes
@@ -59,6 +79,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, sc
 
     return metric_logger
 
+#### Evaluation tools
 
 def _get_iou_types(model):
     model_without_ddp = model
