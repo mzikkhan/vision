@@ -278,60 +278,157 @@ def main(args):
         args.teacher3, weights=args.weights_t3, weights_backbone=args.weights_backbone_t3, num_classes=num_classes, **kwargs
     )
 
+    ## Student 1 config
     student1.to(device)
     if args.distributed and args.sync_bn:
         student1 = torch.nn.SyncBatchNorm.convert_sync_batchnorm(student1)
-
     student1_without_ddp = student1
     if args.distributed:
        student1 = torch.nn.parallel.DistributedDataParallel(student1, device_ids=[args.gpu])
        student1_without_ddp = student1.module
 
     if args.norm_weight_decay is None:
-        parameters = [p for p in student1.parameters() if p.requires_grad]
+        parameters_s1 = [p for p in student1.parameters() if p.requires_grad]
     else:
-        param_groups = torchvision.ops._utils.split_normalization_params(student1)
-        wd_groups = [args.norm_weight_decay, args.weight_decay]
-        parameters = [{"params": p, "weight_decay": w} for p, w in zip(param_groups, wd_groups) if p]
-
+        param_groups_s1 = torchvision.ops._utils.split_normalization_params(student1)
+        wd_groups_s1 = [args.norm_weight_decay, args.weight_decay]
+        parameters_s1 = [{"params": p, "weight_decay": w} for p, w in zip(param_groups_s1, wd_groups_s1) if p]
     opt_name = args.opt.lower()
     if opt_name.startswith("sgd"):
-        optimizer = torch.optim.SGD(
-            parameters,
+        optimizer_s1 = torch.optim.SGD(
+            parameters_s1,
             lr=args.lr,
             momentum=args.momentum,
             weight_decay=args.weight_decay,
             nesterov="nesterov" in opt_name,
         )
     elif opt_name == "adamw":
-        optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer_s1 = torch.optim.AdamW(parameters_s1, lr=args.lr, weight_decay=args.weight_decay)
     else:
         raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD and AdamW are supported.")
-
-    scaler = torch.cuda.amp.GradScaler() if args.amp else None
-
+    scaler_s1 = torch.cuda.amp.GradScaler() if args.amp else None
     args.lr_scheduler = args.lr_scheduler.lower()
     if args.lr_scheduler == "multisteplr":
-        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_steps, gamma=args.lr_gamma)
+        lr_scheduler_s1 = torch.optim.lr_scheduler.MultiStepLR(optimizer_s1, milestones=args.lr_steps, gamma=args.lr_gamma)
     elif args.lr_scheduler == "cosineannealinglr":
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+        lr_scheduler_s1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_s1, T_max=args.epochs)
     else:
         raise RuntimeError(
             f"Invalid lr scheduler '{args.lr_scheduler}'. Only MultiStepLR and CosineAnnealingLR are supported."
         )
-
     if args.resume:
-        checkpoint = torch.load(args.resume, map_location="cpu")
+        checkpoint_s1 = torch.load(args.resume, map_location="cpu")
         student1_without_ddp.load_state_dict(checkpoint["model"])
-        optimizer.load_state_dict(checkpoint["optimizer"])
-        lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
+        optimizer_s1.load_state_dict(checkpoint["optimizer"])
+        lr_scheduler_s1.load_state_dict(checkpoint["lr_scheduler"])
         args.start_epoch = checkpoint["epoch"] + 1
         if args.amp:
-            scaler.load_state_dict(checkpoint["scaler"])
-
+            scaler_s1.load_state_dict(checkpoint["scaler"])
     if args.test_only:
         torch.backends.cudnn.deterministic = True
         evaluate(student1, data_loader_test, device=device)
+        return
+    
+    ## Student 2 config
+    student2.to(device)
+    if args.distributed and args.sync_bn:
+        student2 = torch.nn.SyncBatchNorm.convert_sync_batchnorm(student2)
+    student2_without_ddp = student2
+    if args.distributed:
+       student2 = torch.nn.parallel.DistributedDataParallel(student2, device_ids=[args.gpu])
+       student2_without_ddp = student2.module
+
+    if args.norm_weight_decay is None:
+        parameters_s2 = [p for p in student2.parameters() if p.requires_grad]
+    else:
+        param_groups_s2 = torchvision.ops._utils.split_normalization_params(student2)
+        wd_groups_s2 = [args.norm_weight_decay, args.weight_decay]
+        parameters_s2 = [{"params": p, "weight_decay": w} for p, w in zip(param_groups_s2, wd_groups_s2) if p]
+    opt_name = args.opt.lower()
+    if opt_name.startswith("sgd"):
+        optimizer_s2 = torch.optim.SGD(
+            parameters_s2,
+            lr=args.lr,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+            nesterov="nesterov" in opt_name,
+        )
+    elif opt_name == "adamw":
+        optimizer_s2 = torch.optim.AdamW(parameters_s2, lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD and AdamW are supported.")
+    scaler_s2 = torch.cuda.amp.GradScaler() if args.amp else None
+    args.lr_scheduler = args.lr_scheduler.lower()
+    if args.lr_scheduler == "multisteplr":
+        lr_scheduler_s2 = torch.optim.lr_scheduler.MultiStepLR(optimizer_s2, milestones=args.lr_steps, gamma=args.lr_gamma)
+    elif args.lr_scheduler == "cosineannealinglr":
+        lr_scheduler_s2 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_s2, T_max=args.epochs)
+    else:
+        raise RuntimeError(
+            f"Invalid lr scheduler '{args.lr_scheduler}'. Only MultiStepLR and CosineAnnealingLR are supported."
+        )
+    if args.resume:
+        checkpoint_s2 = torch.load(args.resume, map_location="cpu")
+        student2_without_ddp.load_state_dict(checkpoint["model"])
+        optimizer_s2.load_state_dict(checkpoint["optimizer"])
+        lr_scheduler_s2.load_state_dict(checkpoint["lr_scheduler"])
+        args.start_epoch = checkpoint["epoch"] + 1
+        if args.amp:
+            scaler_s2.load_state_dict(checkpoint["scaler"])
+    if args.test_only:
+        torch.backends.cudnn.deterministic = True
+        evaluate(student2, data_loader_test, device=device)
+        return
+    
+    ## Student 3 config
+    student3.to(device)
+    if args.distributed and args.sync_bn:
+        student3 = torch.nn.SyncBatchNorm.convert_sync_batchnorm(student3)
+    student3_without_ddp = student3
+    if args.distributed:
+       student3 = torch.nn.parallel.DistributedDataParallel(student3, device_ids=[args.gpu])
+       student3_without_ddp = student3.module
+
+    if args.norm_weight_decay is None:
+        parameters_s3 = [p for p in student3.parameters() if p.requires_grad]
+    else:
+        param_groups_s3 = torchvision.ops._utils.split_normalization_params(student3)
+        wd_groups_s3 = [args.norm_weight_decay, args.weight_decay]
+        parameters_s3 = [{"params": p, "weight_decay": w} for p, w in zip(param_groups_s3, wd_groups_s3) if p]
+    opt_name = args.opt.lower()
+    if opt_name.startswith("sgd"):
+        optimizer_s3 = torch.optim.SGD(
+            parameters_s3,
+            lr=args.lr,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+            nesterov="nesterov" in opt_name,
+        )
+    elif opt_name == "adamw":
+        optimizer_s3 = torch.optim.AdamW(parameters_s3, lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD and AdamW are supported.")
+    scaler_s3 = torch.cuda.amp.GradScaler() if args.amp else None
+    args.lr_scheduler = args.lr_scheduler.lower()
+    if args.lr_scheduler == "multisteplr":
+        lr_scheduler_s3 = torch.optim.lr_scheduler.MultiStepLR(optimizer_s3, milestones=args.lr_steps, gamma=args.lr_gamma)
+    elif args.lr_scheduler == "cosineannealinglr":
+        lr_scheduler_s3 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_s3, T_max=args.epochs)
+    else:
+        raise RuntimeError(
+            f"Invalid lr scheduler '{args.lr_scheduler}'. Only MultiStepLR and CosineAnnealingLR are supported."
+        )
+    if args.resume:
+        checkpoint_s3 = torch.load(args.resume, map_location="cpu")
+        student3_without_ddp.load_state_dict(checkpoint["model"])
+        optimizer_s3.load_state_dict(checkpoint["optimizer"])
+        lr_scheduler_s3.load_state_dict(checkpoint["lr_scheduler"])
+        args.start_epoch = checkpoint["epoch"] + 1
+        if args.amp:
+            scaler_s3.load_state_dict(checkpoint["scaler"])
+    if args.test_only:
+        torch.backends.cudnn.deterministic = True
+        evaluate(student3, data_loader_test, device=device)
         return
 
     ## Training loop
@@ -341,20 +438,22 @@ def main(args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         ## Calling the train step
-        train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, optimizer, data_loader, device, epoch, args.print_freq, scaler)
-        lr_scheduler.step()
+        train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, optimizer_s1, optimizer_s2, optimizer_s3, data_loader, device, epoch, args.print_freq, scaler_s1, scaler_s2, scaler_s3)
+        lr_scheduler_s1.step()
+        lr_scheduler_s2.step()
+        lr_scheduler_s3.step()
         if args.output_dir:
             ## Creating checkpoint
             checkpoint = {
                 "model": student1_without_ddp.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "lr_scheduler": lr_scheduler.state_dict(),
+                "optimizer": optimizer_s1.state_dict(),
+                "lr_scheduler": lr_scheduler_s1.state_dict(),
                 "args": args,
                 "epoch": epoch,
             }
             ## Saving weights to output_dir
             if args.amp:
-                checkpoint["scaler"] = scaler.state_dict()
+                checkpoint["scaler"] = scaler_s1.state_dict()
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
