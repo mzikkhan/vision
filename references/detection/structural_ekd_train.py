@@ -67,14 +67,14 @@ def get_args_parser(add_help=True):
 
     # EKD parts
     ## Taking input of teacher models
-    parser.add_argument("--teacher1", default="maskrcnn_resnet50_fpn", type=str, help="teacher1 model name")
-    parser.add_argument("--teacher2", default="maskrcnn_resnet50_fpn", type=str, help="teacher2 model name")
-    parser.add_argument("--teacher3", default="maskrcnn_resnet50_fpn", type=str, help="teacher3 model name")
+    parser.add_argument("--teacher1", default="fasterrcnn_resnet50_fpn", type=str, help="teacher1 model name")
+    parser.add_argument("--teacher2", default="fasterrcnn_resnet50_fpn", type=str, help="teacher2 model name")
+    parser.add_argument("--teacher3", default="fasterrcnn_resnet50_fpn", type=str, help="teacher3 model name")
 
     ## Taking input of student models
-    parser.add_argument("--student1", default="maskrcnn_resnet50_fpn", type=str, help="student1 model name")
-    parser.add_argument("--student2", default="maskrcnn_resnet50_fpn", type=str, help="student2 model name")
-    parser.add_argument("--student3", default="maskrcnn_resnet50_fpn", type=str, help="student3 model name")
+    parser.add_argument("--student1", default="fasterrcnn_mobilenet_v3_large_fpn", type=str, help="student1 model name")
+    parser.add_argument("--student2", default="fasterrcnn_mobilenet_v3_large_fpn", type=str, help="student2 model name")
+    parser.add_argument("--student3", default="fasterrcnn_mobilenet_v3_large_fpn", type=str, help="student3 model name")
 
     # Training Hyperparameters
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
@@ -161,19 +161,19 @@ def get_args_parser(add_help=True):
     parser.add_argument("--dist-url", default="env://", type=str, help="url used to set up distributed training")
 
     # weights
-    parser.add_argument("--weights_s1", default=None, type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_s2", default=None, type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_s3", default=None, type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t1", default=None, type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t2", default=None, type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t3", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s1", default="FasterRCNN_MobileNet_V3_Large_320_FPN_Weights", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s2", default="FasterRCNN_MobileNet_V3_Large_320_FPN_Weights", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s3", default="FasterRCNN_MobileNet_V3_Large_320_FPN_Weights", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t1", default="FasterRCNN_ResNet50_FPN_Weights", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t2", default="FasterRCNN_ResNet50_FPN_Weights", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t3", default="FasterRCNN_ResNet50_FPN_Weights", type=str, help="the weights enum name to load")
 
-    parser.add_argument("--weights-backbone_s1", default=None, type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_s2", default=None, type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_s3", default=None, type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t1", default=None, type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t2", default=None, type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t3", default=None, type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s1", default="MobileNet_V3_Large_Weights", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s2", default="MobileNet_V3_Large_Weights", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s3", default="MobileNet_V3_Large_Weights", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t1", default="ResNet50_Weights", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t2", default="ResNet50_Weights", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t3", default="ResNet50_Weights", type=str, help="the backbone weights enum name to load")
 
 
     # Mixed precision training parameters
