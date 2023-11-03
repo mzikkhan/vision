@@ -26,7 +26,7 @@ def copypaste_collate_fn(batch):
 def get_dataset(is_train, args):
     image_set = "train" if is_train else "val"
     num_classes, mode = {"coco": (91, "instances"), "coco_kp": (2, "person_keypoints")}[args.dataset]
-    with_masks = "mask" in args.model
+    with_masks = "mask" in args.student1
     ds = get_coco(
         root=args.data_path,
         image_set=image_set,
@@ -43,8 +43,8 @@ def get_transform(is_train, args):
         return presets.DetectionPresetTrain(
             data_augmentation=args.data_augmentation, backend=args.backend, use_v2=args.use_v2
         )
-    elif args.weights and args.test_only:
-        weights = torchvision.models.get_weight(args.weights)
+    elif args.weights_s1 and args.test_only:
+        weights = torchvision.models.get_weight(args.weights_s1)
         trans = weights.transforms()
         return lambda img, target: (trans(img), target)
     else:
@@ -57,7 +57,7 @@ def get_args_parser(add_help=True):
     parser = argparse.ArgumentParser(description="PyTorch Detection Training: Ensemble Structural Knowledge Distillation", add_help=add_help)
 
     # Loading dataset
-    parser.add_argument("--data-path", default="content/dataset/coco", type=str, help="dataset path")
+    parser.add_argument("--data-path", default="/content/datasets/coco", type=str, help="dataset path")
     parser.add_argument(
         "--dataset",
         default="coco",
@@ -72,9 +72,9 @@ def get_args_parser(add_help=True):
     parser.add_argument("--teacher3", default="fasterrcnn_resnet50_fpn", type=str, help="teacher3 model name")
 
     ## Taking input of student models
-    parser.add_argument("--student1", default="fasterrcnn_mobilenet_v3_large_fpn", type=str, help="student1 model name")
-    parser.add_argument("--student2", default="fasterrcnn_mobilenet_v3_large_fpn", type=str, help="student2 model name")
-    parser.add_argument("--student3", default="fasterrcnn_mobilenet_v3_large_fpn", type=str, help="student3 model name")
+    parser.add_argument("--student1", default="fasterrcnn_resnet50_fpn", type=str, help="student1 model name")
+    parser.add_argument("--student2", default="fasterrcnn_resnet50_fpn", type=str, help="student2 model name")
+    parser.add_argument("--student3", default="fasterrcnn_resnet50_fpn", type=str, help="student3 model name")
 
     # Training Hyperparameters
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
@@ -161,19 +161,19 @@ def get_args_parser(add_help=True):
     parser.add_argument("--dist-url", default="env://", type=str, help="url used to set up distributed training")
 
     # weights
-    parser.add_argument("--weights_s1", default="FasterRCNN_MobileNet_V3_Large_320_FPN_Weights", type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_s2", default="FasterRCNN_MobileNet_V3_Large_320_FPN_Weights", type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_s3", default="FasterRCNN_MobileNet_V3_Large_320_FPN_Weights", type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t1", default="FasterRCNN_ResNet50_FPN_Weights", type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t2", default="FasterRCNN_ResNet50_FPN_Weights", type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t3", default="FasterRCNN_ResNet50_FPN_Weights", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s1", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s2", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_s3", default=None, type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t1", default="FasterRCNN_ResNet101_FPN_Weights.DEFAULT", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t2", default="FasterRCNN_ResNet101_FPN_Weights.DEFAULT", type=str, help="the weights enum name to load")
+    parser.add_argument("--weights_t3", default="FasterRCNN_ResNet101_FPN_Weights.DEFAULT", type=str, help="the weights enum name to load")
 
-    parser.add_argument("--weights-backbone_s1", default="MobileNet_V3_Large_Weights", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_s2", default="MobileNet_V3_Large_Weights", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_s3", default="MobileNet_V3_Large_Weights", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t1", default="ResNet50_Weights", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t2", default="ResNet50_Weights", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t3", default="ResNet50_Weights", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s1", default="ResNet50_Weights.DEFAULT", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s2", default="ResNet50_Weights.DEFAULT", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_s3", default="ResNet50_Weights.DEFAULT", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t1", default="ResNet101_Weights.IMAGENET1K_V1", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t2", default="ResNet101_Weights.IMAGENET1K_V1", type=str, help="the backbone weights enum name to load")
+    parser.add_argument("--weights-backbone_t3", default="ResNet101_Weights.IMAGENET1K_V1", type=str, help="the backbone weights enum name to load")
 
 
     # Mixed precision training parameters
@@ -197,7 +197,7 @@ def main(args):
         raise ValueError("Use --use-v2 if you want to use the tv_tensor backend.")
     if args.dataset not in ("coco", "coco_kp"):
         raise ValueError(f"Dataset should be coco or coco_kp, got {args.dataset}")
-    if "keypoint" in args.model and args.dataset != "coco_kp":
+    if "keypoint" in args.student1 and args.dataset != "coco_kp":
         raise ValueError("Oops, if you want Keypoint detection, set --dataset coco_kp")
     if args.dataset == "coco_kp" and args.use_v2:
         raise ValueError("KeyPoint detection doesn't support V2 transforms yet")
@@ -254,7 +254,7 @@ def main(args):
 
     if args.data_augmentation in ["multiscale", "lsj"]:
         kwargs["_skip_resize"] = True
-    if "rcnn" in args.model:
+    if "rcnn" in args.student1:
         if args.rpn_score_thresh is not None:
             kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
@@ -430,6 +430,11 @@ def main(args):
         torch.backends.cudnn.deterministic = True
         evaluate(student3, data_loader_test, device=device)
         return
+    
+    ### Teacher config
+    teacher1.to(device)
+    teacher2.to(device)
+    teacher3.to(device)
 
     ## Training loop
     print("Start training")

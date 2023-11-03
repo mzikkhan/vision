@@ -7,7 +7,8 @@ import torchvision.models.detection.mask_rcnn
 import utils
 from coco_eval import CocoEvaluator
 from coco_utils import get_coco_api_from_dataset
-
+import torch.nn as nn
+from kornia.losses import ssim_loss
 
 def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, optimizer_s1, optimizer_s2, optimizer_s3, data_loader, device, epoch, print_freq, scaler_s1=None, scaler_s2=None, scaler_s3=None):
     # Setting students to evaluation mode
@@ -48,16 +49,29 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
         with torch.cuda.amp.autocast(enabled=scaler_s1 is not None):
+            features_t1 = []
+            features_t2 = []
+            features_t3 = []
+            features_s1 = []
+            features_s2 = []
+            features_s3 = []
 
-            # Extracting teacher features
-            features_t1 = teacher1.backbone(images)
-            features_t2 = teacher2.backbone(images)
-            features_t3 = teacher3.backbone(images)
+            for image in images:
+                # Extracting teacher features
+                features_t1.append(teacher1.backbone(image))
+                features_t2.append(teacher2.backbone(image))
+                features_t3.append(teacher3.backbone(image))
 
-            # Extracting student features
-            features_s1 = student1.backbone(images)
-            features_s2 = student2.backbone(images)
-            features_s3 = student3.backbone(images)
+                # Extracting student features
+                features_s1.append(student1.backbone(image))
+                features_s2.append(student2.backbone(image))
+                features_s3.append(student3.backbone(image))
+
+            # Calculating Distillation Loss
+            print("Student: ", features_s1[0]['0'].size())
+            print("Teacher: ", features_t1[0]['0'].size())
+            print("SSIM loss: ", ssim_loss(features_s1[0]['0'],features_t1[0]['0'], window_size=11 ))
+            break
 
             # Setting students to training mode
             student1.train()
