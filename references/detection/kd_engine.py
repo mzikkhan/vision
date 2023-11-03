@@ -50,14 +50,14 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
         with torch.cuda.amp.autocast(enabled=scaler_s1 is not None):
 
             # Extracting teacher features
-            features_t1 = teacher1(images)
-            features_t2 = teacher2(images)
-            features_t3 = teacher3(images)
+            features_t1 = teacher1.backbone(images)
+            features_t2 = teacher2.backbone(images)
+            features_t3 = teacher3.backbone(images)
 
             # Extracting student features
-            features_s1 = student1(images)
-            features_s2 = student2(images)
-            features_s3 = student3(images)
+            features_s1 = student1.backbone(images)
+            features_s2 = student2.backbone(images)
+            features_s3 = student3.backbone(images)
 
             # Setting students to training mode
             student1.train()
