@@ -1,22 +1,35 @@
 import math
 import sys
 import time
-
 import torch
 import torchvision.models.detection.mask_rcnn
 import utils
 from coco_eval import CocoEvaluator
 from coco_utils import get_coco_api_from_dataset
 import torch.nn as nn
+import torchvision
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models.detection import FasterRCNN
 from kornia.losses import ssim_loss
 
-def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, optimizer_s1, optimizer_s2, optimizer_s3, data_loader, device, epoch, print_freq, scaler_s1=None, scaler_s2=None, scaler_s3=None):
+def train_one_epoch(student1, student2, student3, optimizer_s1, optimizer_s2, optimizer_s3, data_loader, device, epoch, print_freq, scaler_s1=None, scaler_s2=None, scaler_s3=None):
     # Setting students to evaluation mode
     student1.eval()
     student2.eval()
     student3.eval()
 
-    # Setting teachers to evaluation mode
+    # Creating and setting teachers to evaluation mode
+    backbone = resnet_fpn_backbone('resnet101', False)
+    teacher1 = FasterRCNN(backbone, num_classes=91)
+    teacher2 = FasterRCNN(backbone, num_classes=91)
+    teacher3 = FasterRCNN(backbone, num_classes=91)
+    state_dict = torch.hub.load_state_dict_from_url("https://ababino-models.s3.amazonaws.com/resnet101_7a82fa4a.pth")
+    teacher1.load_state_dict(state_dict['model'])
+    teacher2.load_state_dict(state_dict['model'])
+    teacher3.load_state_dict(state_dict['model'])
+    teacher1.to(device)
+    teacher2.to(device)
+    teacher3.to(device)
     teacher1.eval()
     teacher2.eval()
     teacher3.eval()
@@ -46,6 +59,7 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
         )
 
     for images, targets in metric_logger.log_every(data_loader, print_freq, header):
+        epoch_loss = 0
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
         with torch.cuda.amp.autocast(enabled=scaler_s1 is not None):
@@ -58,9 +72,13 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
 
             for image in images:
                 # Extracting teacher features
-                features_t1.append(teacher1.backbone(image))
-                features_t2.append(teacher2.backbone(image))
-                features_t3.append(teacher3.backbone(image))
+                tfeat1 = teacher1.backbone(image)
+                tfeat2 = teacher2.backbone(image)
+                tfeat3 = teacher3.backbone(image)
+
+                features_t1.append(tfeat1)
+                features_t2.append(tfeat2)
+                features_t3.append(tfeat3)
 
                 # Extracting student features
                 features_s1.append(student1.backbone(image))
@@ -68,10 +86,32 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
                 features_s3.append(student3.backbone(image))
 
             # Calculating Distillation Loss
-            print("Student: ", features_s1[0]['0'].size())
-            print("Teacher: ", features_t1[0]['0'].size())
-            print("SSIM loss: ", ssim_loss(features_s1[0]['0'],features_t1[0]['0'], window_size=11 ))
-            break
+            kd_loss = 0
+
+            # Part 1: Individual SSIM Loss
+            kd_loss_part_1 = 0
+            for i in range(2):
+                kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t1[i]['0'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s2[i]['0'],features_t2[i]['0'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s3[i]['0'],features_t3[i]['0'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t1[i]['1'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s2[i]['1'],features_t2[i]['1'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s3[i]['1'],features_t3[i]['1'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t1[i]['2'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s2[i]['2'],features_t2[i]['2'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s3[i]['2'],features_t3[i]['2'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s1[i]['3'],features_t1[i]['3'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s2[i]['3'],features_t2[i]['3'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s3[i]['3'],features_t3[i]['3'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s1[i]['pool'],features_t1[i]['pool'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s2[i]['pool'],features_t2[i]['pool'], window_size=11)
+                kd_loss_part_1 += ssim_loss(features_s3[i]['pool'],features_t3[i]['pool'], window_size=11)
+
+            # Part 2: Total SSIM Loss
+            # has not worked due to clash of dimensionality
+
+            # Part 3: Total KD Loss
+            kd_loss = kd_loss_part_1
 
             # Setting students to training mode
             student1.train()
@@ -82,9 +122,12 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
             loss_dict2 = student2(images, targets)
             loss_dict3 = student3(images, targets)
 
+            lambd = 2
+
             losses = sum(loss for loss in loss_dict1.values())
             losses += sum(loss for loss in loss_dict2.values())
             losses += sum(loss for loss in loss_dict3.values())
+            total_loss = losses + (lambd*kd_loss)
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict1)
@@ -112,7 +155,8 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
         #     optimizer_s3.step()
 
         # Backpropagation
-        losses.backward()
+        epoch_loss += total_loss.item()
+        total_loss.backward()
 
         # Gradient Descent
         optimizer_s1.step()
@@ -133,6 +177,7 @@ def train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, 
         metric_logger.update(lr=optimizer_s1.param_groups[0]["lr"])
         # metric_logger.update(lr=optimizer_s2.param_groups[0]["lr"])
         # metric_logger.update(lr=optimizer_s3.param_groups[0]["lr"])
+        print("Epoch Loss:", epoch_loss / len(data_loader))
 
     return metric_logger
 

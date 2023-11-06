@@ -66,11 +66,6 @@ def get_args_parser(add_help=True):
     )
 
     # EKD parts
-    ## Taking input of teacher models
-    parser.add_argument("--teacher1", default="fasterrcnn_resnet50_fpn", type=str, help="teacher1 model name")
-    parser.add_argument("--teacher2", default="fasterrcnn_resnet50_fpn", type=str, help="teacher2 model name")
-    parser.add_argument("--teacher3", default="fasterrcnn_resnet50_fpn", type=str, help="teacher3 model name")
-
     ## Taking input of student models
     parser.add_argument("--student1", default="fasterrcnn_resnet50_fpn", type=str, help="student1 model name")
     parser.add_argument("--student2", default="fasterrcnn_resnet50_fpn", type=str, help="student2 model name")
@@ -164,17 +159,10 @@ def get_args_parser(add_help=True):
     parser.add_argument("--weights_s1", default=None, type=str, help="the weights enum name to load")
     parser.add_argument("--weights_s2", default=None, type=str, help="the weights enum name to load")
     parser.add_argument("--weights_s3", default=None, type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t1", default="FasterRCNN_ResNet101_FPN_Weights.DEFAULT", type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t2", default="FasterRCNN_ResNet101_FPN_Weights.DEFAULT", type=str, help="the weights enum name to load")
-    parser.add_argument("--weights_t3", default="FasterRCNN_ResNet101_FPN_Weights.DEFAULT", type=str, help="the weights enum name to load")
 
     parser.add_argument("--weights-backbone_s1", default="ResNet50_Weights.DEFAULT", type=str, help="the backbone weights enum name to load")
     parser.add_argument("--weights-backbone_s2", default="ResNet50_Weights.DEFAULT", type=str, help="the backbone weights enum name to load")
     parser.add_argument("--weights-backbone_s3", default="ResNet50_Weights.DEFAULT", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t1", default="ResNet101_Weights.IMAGENET1K_V1", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t2", default="ResNet101_Weights.IMAGENET1K_V1", type=str, help="the backbone weights enum name to load")
-    parser.add_argument("--weights-backbone_t3", default="ResNet101_Weights.IMAGENET1K_V1", type=str, help="the backbone weights enum name to load")
-
 
     # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")
@@ -267,15 +255,6 @@ def main(args):
     )
     student3 = torchvision.models.get_model(
         args.student3, weights=args.weights_s3, weights_backbone=args.weights_backbone_s3, num_classes=num_classes, **kwargs
-    )
-    teacher1 = torchvision.models.get_model(
-        args.teacher1, weights=args.weights_t1, weights_backbone=args.weights_backbone_t1, num_classes=num_classes, **kwargs
-    )
-    teacher2 = torchvision.models.get_model(
-        args.teacher2, weights=args.weights_t2, weights_backbone=args.weights_backbone_t2, num_classes=num_classes, **kwargs
-    )
-    teacher3 = torchvision.models.get_model(
-        args.teacher3, weights=args.weights_t3, weights_backbone=args.weights_backbone_t3, num_classes=num_classes, **kwargs
     )
 
     ## Student 1 config
@@ -430,11 +409,6 @@ def main(args):
         torch.backends.cudnn.deterministic = True
         evaluate(student3, data_loader_test, device=device)
         return
-    
-    ### Teacher config
-    teacher1.to(device)
-    teacher2.to(device)
-    teacher3.to(device)
 
     ## Training loop
     print("Start training")
@@ -443,7 +417,7 @@ def main(args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         ## Calling the train step
-        train_one_epoch(student1, student2, student3, teacher1, teacher2, teacher3, optimizer_s1, optimizer_s2, optimizer_s3, data_loader, device, epoch, args.print_freq, scaler_s1, scaler_s2, scaler_s3)
+        train_one_epoch(student1, student2, student3,optimizer_s1, optimizer_s2, optimizer_s3, data_loader, device, epoch, args.print_freq, scaler_s1, scaler_s2, scaler_s3)
         lr_scheduler_s1.step()
         lr_scheduler_s2.step()
         lr_scheduler_s3.step()
