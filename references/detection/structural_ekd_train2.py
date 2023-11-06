@@ -302,7 +302,7 @@ def main(args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         ## Calling the train step
-        train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, args.print_freq, scaler_s1)
+        train_one_epoch(student1, optimizer_s1, data_loader_test, device, epoch, args.print_freq, scaler_s1)
         lr_scheduler_s1.step()
         if args.output_dir:
             ## Creating checkpoint

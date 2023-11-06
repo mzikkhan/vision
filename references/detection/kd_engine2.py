@@ -17,20 +17,18 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
     student1.eval()
 
     # Creating and setting teachers to evaluation mode
-    backbone = resnet_fpn_backbone('resnet101', False)
-    teacher1 = FasterRCNN(backbone, num_classes=91)
-    teacher2 = FasterRCNN(backbone, num_classes=91)
-    teacher3 = FasterRCNN(backbone, num_classes=91)
-    state_dict = torch.hub.load_state_dict_from_url("https://ababino-models.s3.amazonaws.com/resnet101_7a82fa4a.pth")
-    teacher1.load_state_dict(state_dict['model'])
-    teacher2.load_state_dict(state_dict['model'])
-    teacher3.load_state_dict(state_dict['model'])
+    teacher1 = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
+    teacher2 = FasterRCNN(resnet_fpn_backbone('resnet101', False), num_classes=91)
+    # teacher3 = FasterRCNN(backbone, num_classes=91)
+    state_dict2 = torch.hub.load_state_dict_from_url("https://ababino-models.s3.amazonaws.com/resnet101_7a82fa4a.pth")
+    teacher2.load_state_dict(state_dict2['model'])
+    # teacher3.load_state_dict(state_dict['model'])
     teacher1.to(device)
     teacher2.to(device)
-    teacher3.to(device)
+    # teacher3.to(device)
     teacher1.eval()
     teacher2.eval()
-    teacher3.eval()
+    # teacher3.eval()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
@@ -47,62 +45,60 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
         )
 
     for images, targets in metric_logger.log_every(data_loader, print_freq, header):
-        epoch_loss = 0
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+        
+        features_t1 = []
+        features_t2 = []
+        # features_t3 = []
+        features_s1 = []
+
+        for image in images:
+            # Extracting teacher features
+            tfeat1 = teacher1.backbone(image)
+            tfeat2 = teacher2.backbone(image)
+            # tfeat3 = teacher3.backbone(image)
+
+            features_t1.append(tfeat1)
+            features_t2.append(tfeat2)
+            # features_t3.append(tfeat3)
+
+            # Extracting student features
+            features_s1.append(student1.backbone(image))
+
+        # Calculating Distillation Loss
+        kd_loss = 0
+
+        # Part 1: Individual SSIM Loss
+        kd_loss_part_1 = 0
+        for i in range(2):
+            kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t1[i]['0'], window_size=11)
+            kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t1[i]['1'], window_size=11)
+            kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t1[i]['2'], window_size=11)
+            kd_loss_part_1 += ssim_loss(features_s1[i]['3'],features_t1[i]['3'], window_size=11)
+
+            kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t2[i]['0'], window_size=11)
+            kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t2[i]['1'], window_size=11)
+            kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t2[i]['2'], window_size=11)
+            kd_loss_part_1 += ssim_loss(features_s1[i]['3'],features_t2[i]['3'], window_size=11)
+
+            # kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t3[i]['0'], window_size=11)
+            # kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t3[i]['1'], window_size=11)
+            # kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t3[i]['2'], window_size=11)
+            # kd_loss_part_1 += ssim_loss(features_s1[i]['3'],features_t3[i]['3'], window_size=11)
+
+        # Part 2: Total SSIM Loss
+        # has not worked due to clash of dimensionality
+
+        # Part 3: Total KD Loss
+        kd_loss = kd_loss_part_1
+
+        # Setting students to training mode
+        student1.train()
+
         with torch.cuda.amp.autocast(enabled=scaler_s1 is not None):
-            features_t1 = []
-            features_t2 = []
-            features_t3 = []
-            features_s1 = []
-
-            for image in images:
-                # Extracting teacher features
-                tfeat1 = teacher1.backbone(image)
-                tfeat2 = teacher2.backbone(image)
-                tfeat3 = teacher3.backbone(image)
-
-                features_t1.append(tfeat1)
-                features_t2.append(tfeat2)
-                features_t3.append(tfeat3)
-
-                # Extracting student features
-                features_s1.append(student1.backbone(image))
-
-            # Calculating Distillation Loss
-            kd_loss = 0
-
-            # Part 1: Individual SSIM Loss
-            kd_loss_part_1 = 0
-            for i in range(2):
-                kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t1[i]['0'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t1[i]['1'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t1[i]['2'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['3'],features_t1[i]['3'], window_size=11)
-
-                kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t2[i]['0'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t2[i]['1'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t2[i]['2'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['3'],features_t2[i]['3'], window_size=11)
-
-                kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t3[i]['0'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t3[i]['1'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t3[i]['2'], window_size=11)
-                kd_loss_part_1 += ssim_loss(features_s1[i]['3'],features_t3[i]['3'], window_size=11)
-
-            # Part 2: Total SSIM Loss
-            # has not worked due to clash of dimensionality
-
-            # Part 3: Total KD Loss
-            kd_loss = kd_loss_part_1
-
-            # Setting students to training mode
-            student1.train()
-
             loss_dict1 = student1(images, targets)
-
             lambd = 2
-
             losses = sum(loss for loss in loss_dict1.values())
             total_loss = losses + (lambd*kd_loss)
 
@@ -115,7 +111,8 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
         if not math.isfinite(loss_value):
             print(f"Loss is {loss_value}, stopping training")
             print(loss_dict_reduced)
-            sys.exit(1)
+            # sys.exit(1)
+            return metric_logger
 
         optimizer_s1.zero_grad()
 

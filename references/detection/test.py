@@ -18,6 +18,8 @@ from torchvision.transforms import InterpolationMode
 from transforms import SimpleCopyPaste
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
+import tensorflow as tf
+from tensorflow.python import pywrap_tensorflow
 
 
 def copypaste_collate_fn(batch):
@@ -79,6 +81,13 @@ def get_args_parser(add_help=True):
     parser.add_argument(
         "--use-deterministic-algorithms", action="store_true", help="Forces the use of deterministic algorithms only."
     )
+    parser.add_argument(
+        "-j", "--workers", default=4, type=int, metavar="N", help="number of data loading workers (default: 4)"
+    )
+
+    ## Directory to save outputs
+    parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
+
     # distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
     parser.add_argument("--dist-url", default="env://", type=str, help="url used to set up distributed training")
@@ -138,13 +147,26 @@ def main(args):
         dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers, collate_fn=utils.collate_fn
     )
 
-    print("Creating teacher model")
+    print("Creating student model")
 
     ## Creating the models
-    backbone = resnet_fpn_backbone('resnet18', False)
+    backbone = resnet_fpn_backbone('resnet152', False)
     student1 = FasterRCNN(backbone, num_classes=91)
-    state_dict = torch.hub.load_state_dict_from_url("https://download.pytorch.org/models/resnet18-f37072fd.pth")
-    student1.load_state_dict(state_dict['model'])
+
+    # weights_path = 'res152_faster_rcnn.pkl'
+    # checkpoint = torch.load(weights_path)
+    # student1.load_state_dict(checkpoint)
+
+    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/CSE465/res152_faster_rcnn.ckpt.data-00000-of-00001'
+    reader = pywrap_tensorflow.NewCheckpointReader(checkpoint_path)
+    var_to_shape_map = reader.get_variable_to_shape_map()
+    # Transfer weights from TensorFlow to PyTorch
+    for name, tensor in var_to_shape_map.items():
+        try:
+            name = name.replace('/', '.').replace(':0', '')
+            student1.state_dict()[name].copy_(torch.from_numpy(reader.get_tensor(name)))
+        except KeyError:
+            print("Skipping {}: not found in PyTorch model.".format(name))
 
     ## Student 1 config
     student1.to(device)
