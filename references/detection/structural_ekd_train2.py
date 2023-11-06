@@ -16,6 +16,8 @@ from kd_engine2 import train_one_epoch
 from group_by_aspect_ratio import create_aspect_ratio_groups, GroupedBatchSampler
 from torchvision.transforms import InterpolationMode
 from transforms import SimpleCopyPaste
+from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
+from torchvision.models.detection import FasterRCNN
 
 
 def copypaste_collate_fn(batch):
@@ -26,14 +28,14 @@ def copypaste_collate_fn(batch):
 def get_dataset(is_train, args):
     image_set = "train" if is_train else "val"
     num_classes, mode = {"coco": (91, "instances"), "coco_kp": (2, "person_keypoints")}[args.dataset]
-    with_masks = "mask" in args.student1
+    # with_masks = "mask" in args.student1
     ds = get_coco(
         root=args.data_path,
         image_set=image_set,
         transforms=get_transform(is_train, args),
         mode=mode,
         use_v2=args.use_v2,
-        with_masks=with_masks,
+        # with_masks=with_masks,
     )
     return ds, num_classes
 
@@ -66,9 +68,6 @@ def get_args_parser(add_help=True):
     )
 
     # EKD parts
-    ## Taking input of student models
-    parser.add_argument("--student1", default="fasterrcnn_resnet50_fpn", type=str, help="student1 model name")
-    
     # Training Hyperparameters
     parser.add_argument("--device", default="cuda", type=str, help="device (Use cuda or cpu Default: cuda)")
     parser.add_argument(
@@ -178,7 +177,7 @@ def main(args):
         raise ValueError("Use --use-v2 if you want to use the tv_tensor backend.")
     if args.dataset not in ("coco", "coco_kp"):
         raise ValueError(f"Dataset should be coco or coco_kp, got {args.dataset}")
-    if "keypoint" in args.student1 and args.dataset != "coco_kp":
+    if "keypoint" in args.dataset != "coco_kp":
         raise ValueError("Oops, if you want Keypoint detection, set --dataset coco_kp")
     if args.dataset == "coco_kp" and args.use_v2:
         raise ValueError("KeyPoint detection doesn't support V2 transforms yet")
@@ -226,7 +225,7 @@ def main(args):
     )
 
     data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, batch_size=1, sampler=test_sampler, num_workers=args.workers, collate_fn=utils.collate_fn
+        dataset_test, batch_size=2, sampler=test_sampler, num_workers=args.workers, collate_fn=utils.collate_fn
     )
 
     print("Creating teacher model")
@@ -235,14 +234,15 @@ def main(args):
 
     if args.data_augmentation in ["multiscale", "lsj"]:
         kwargs["_skip_resize"] = True
-    if "rcnn" in args.student1:
-        if args.rpn_score_thresh is not None:
-            kwargs["rpn_score_thresh"] = args.rpn_score_thresh
+    # if "rcnn" in args.student1:
+    #     if args.rpn_score_thresh is not None:
+    #         kwargs["rpn_score_thresh"] = args.rpn_score_thresh
+    if args.rpn_score_thresh is not None:
+        kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
     ## Creating the models
-    student1 = torchvision.models.get_model(
-        args.student1, weights=args.weights_s1, weights_backbone=args.weights_backbone_s1, num_classes=num_classes, **kwargs
-    )
+    backbone = resnet_fpn_backbone('resnet18', True)
+    student1 = FasterRCNN(backbone, num_classes=91)
 
     ## Student 1 config
     student1.to(device)
