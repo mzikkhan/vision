@@ -75,6 +75,10 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
 
         # Part 1: Individual MSE Loss
         kd_loss_part_1 = 0
+
+        # Part 1: Individual SSIM Loss
+        kd_loss_part_2 = 0
+
         for i in range(2):
             kd_loss_part_1 += mse_loss(features_s1[i]['0'],features_t1[i]['0'])
             kd_loss_part_1 += mse_loss(features_s1[i]['1'],features_t1[i]['1'])
@@ -86,6 +90,16 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
             kd_loss_part_1 += mse_loss(features_s1[i]['2'],features_t2[i]['2'])
             kd_loss_part_1 += mse_loss(features_s1[i]['3'],features_t2[i]['3'])
 
+            kd_loss_part_2 += ssim_loss(features_s1[i]['0'],features_t1[i]['0'], window_size=11)
+            kd_loss_part_2 += ssim_loss(features_s1[i]['1'],features_t1[i]['1'], window_size=11)
+            kd_loss_part_2 += ssim_loss(features_s1[i]['2'],features_t1[i]['2'], window_size=11)
+            kd_loss_part_2 += ssim_loss(features_s1[i]['3'],features_t1[i]['3'], window_size=11)
+
+            kd_loss_part_2 += ssim_loss(features_s1[i]['0'],features_t2[i]['0'], window_size=11)
+            kd_loss_part_2 += ssim_loss(features_s1[i]['1'],features_t2[i]['1'], window_size=11)
+            kd_loss_part_2 += ssim_loss(features_s1[i]['2'],features_t2[i]['2'], window_size=11)
+            kd_loss_part_2 += ssim_loss(features_s1[i]['3'],features_t2[i]['3'], window_size=11)
+
             # kd_loss_part_1 += ssim_loss(features_s1[i]['0'],features_t3[i]['0'], window_size=11)
             # kd_loss_part_1 += ssim_loss(features_s1[i]['1'],features_t3[i]['1'], window_size=11)
             # kd_loss_part_1 += ssim_loss(features_s1[i]['2'],features_t3[i]['2'], window_size=11)
@@ -94,12 +108,11 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
         # Part 2: Total SSIM Loss
         # has not worked due to clash of dimensionality
 
-        # Part 3: Total KD Loss
-        kd_loss = kd_loss_part_1
-
         # Setting students to training mode
         student1.train()
         with torch.cuda.amp.autocast(enabled=scaler_s1 is not None):
+            # Part 3: Total KD Loss
+            kd_loss = 0.25*kd_loss_part_1 + 0.75*kd_loss_part_2
             loss_dict1 = student1(images, targets)
             lambd = 2
             losses = sum(loss for loss in loss_dict1.values())
