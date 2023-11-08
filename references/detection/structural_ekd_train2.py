@@ -243,7 +243,7 @@ def main(args):
     ## Creating the models
     backbone = resnet_fpn_backbone('resnet18', True)
     student1 = FasterRCNN(backbone, num_classes=91)
-    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/model_4.pth'
+    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/best_model.pth'
     student1.load_state_dict(torch.load(checkpoint_path)["model"])
 
     ## Student 1 config
