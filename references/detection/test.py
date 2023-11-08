@@ -11,8 +11,8 @@ import torchvision.models.detection
 import torchvision.models.detection.mask_rcnn
 import utils
 from coco_utils import get_coco
-from engine import evaluate
-from kd_engine2 import train_one_epoch
+from engine import evaluate, train_one_epoch
+# from kd_engine2 import train_one_epoch
 from group_by_aspect_ratio import create_aspect_ratio_groups, GroupedBatchSampler
 from torchvision.transforms import InterpolationMode
 from transforms import SimpleCopyPaste
@@ -150,23 +150,10 @@ def main(args):
     print("Creating student model")
 
     ## Creating the models
-    backbone = resnet_fpn_backbone('resnet152', False)
+    backbone = resnet_fpn_backbone('resnet18', False)
     student1 = FasterRCNN(backbone, num_classes=91)
-
-    # weights_path = 'res152_faster_rcnn.pkl'
-    # checkpoint = torch.load(weights_path)
-    # student1.load_state_dict(checkpoint)
-
-    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/CSE465/res152_faster_rcnn.ckpt.data-00000-of-00001'
-    reader = pywrap_tensorflow.NewCheckpointReader(checkpoint_path)
-    var_to_shape_map = reader.get_variable_to_shape_map()
-    # Transfer weights from TensorFlow to PyTorch
-    for name, tensor in var_to_shape_map.items():
-        try:
-            name = name.replace('/', '.').replace(':0', '')
-            student1.state_dict()[name].copy_(torch.from_numpy(reader.get_tensor(name)))
-        except KeyError:
-            print("Skipping {}: not found in PyTorch model.".format(name))
+    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/CSE465/model_4.pth'
+    student1.load_state_dict(torch.load(checkpoint_path)["model"])
 
     ## Student 1 config
     student1.to(device)
