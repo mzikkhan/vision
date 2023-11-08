@@ -12,13 +12,15 @@ from . import _utils as det_utils
 def fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
     # type: (Tensor, Tensor, List[Tensor], List[Tensor]) -> Tuple[Tensor, Tensor]
     """
-    Computes the loss for Faster R-CNN.
+    Computes the loss for Faster R-CNN with Focal Loss for classification.
 
     Args:
         class_logits (Tensor)
         box_regression (Tensor)
         labels (list[BoxList])
         regression_targets (Tensor)
+        alpha (float): Focal Loss hyperparameter for balancing positive and negative samples.
+        gamma (float): Focal Loss hyperparameter for controlling the rate of decrease of loss for easy/hard examples.
 
     Returns:
         classification_loss (Tensor)
@@ -28,16 +30,20 @@ def fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
     labels = torch.cat(labels, dim=0)
     regression_targets = torch.cat(regression_targets, dim=0)
 
-    classification_loss = F.cross_entropy(class_logits, labels)
+    # Calculate Focal Loss for classification
+    p = F.softmax(class_logits, dim=1)  # Calculate class probabilities
+    ce_loss = F.cross_entropy(class_logits, labels, reduction="none")  # Cross-entropy loss
+    pt = torch.exp(-ce_loss)  # Focal Loss component
+    alpha = 0.25
+    gamma = 2.0
+    focal_loss = (alpha * (1 - pt) ** gamma * ce_loss).mean()
 
-    # get indices that correspond to the regression targets for
-    # the corresponding ground truth labels, to be used with
-    # advanced indexing
+    # Calculate the box regression loss as before
     sampled_pos_inds_subset = torch.where(labels > 0)[0]
     labels_pos = labels[sampled_pos_inds_subset]
     N, num_classes = class_logits.shape
     box_regression = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
-
+    
     box_loss = F.smooth_l1_loss(
         box_regression[sampled_pos_inds_subset, labels_pos],
         regression_targets[sampled_pos_inds_subset],
@@ -46,7 +52,7 @@ def fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
     )
     box_loss = box_loss / labels.numel()
 
-    return classification_loss, box_loss
+    return focal_loss, box_loss
 
 
 def maskrcnn_inference(x, labels):
