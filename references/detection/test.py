@@ -28,7 +28,7 @@ def copypaste_collate_fn(batch):
 
 
 def get_dataset(is_train, args):
-    image_set = "train" if is_train else "val"
+    image_set = "val" if is_train else "train"
     num_classes, mode = {"coco": (91, "instances"), "coco_kp": (2, "person_keypoints")}[args.dataset]
     with_masks = "mask" in args.student1
     ds = get_coco(
@@ -152,7 +152,7 @@ def main(args):
     ## Creating the models
     backbone = resnet_fpn_backbone('resnet18', False)
     student1 = FasterRCNN(backbone, num_classes=91)
-    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/CSE465/model_4.pth'
+    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/best_model.pth'
     student1.load_state_dict(torch.load(checkpoint_path)["model"])
 
     ## Student 1 config

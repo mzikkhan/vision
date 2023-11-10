@@ -86,7 +86,10 @@ def evaluate(model, data_loader, device):
     iou_types = _get_iou_types(model)
     coco_evaluator = CocoEvaluator(coco, iou_types)
 
+    i = 0
     for images, targets in metric_logger.log_every(data_loader, 100, header):
+      if i==2500:
+        break
         images = list(img.to(device) for img in images)
 
         if torch.cuda.is_available():
@@ -102,6 +105,7 @@ def evaluate(model, data_loader, device):
         coco_evaluator.update(res)
         evaluator_time = time.time() - evaluator_time
         metric_logger.update(model_time=model_time, evaluator_time=evaluator_time)
+        i+=1
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

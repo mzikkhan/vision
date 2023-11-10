@@ -26,8 +26,7 @@ def copypaste_collate_fn(batch):
 
 
 def get_dataset(is_train, args):
-    # image_set = "val" if is_train else "val"
-    image_set = "val"
+    image_set = "train" if is_train else "val"
     num_classes, mode = {"coco": (91, "instances"), "coco_kp": (2, "person_keypoints")}[args.dataset]
     with_masks = False
     ds = get_coco(
@@ -225,6 +224,10 @@ def main(args):
         dataset, batch_sampler=train_batch_sampler, num_workers=args.workers, collate_fn=train_collate_fn
     )
 
+    data_loader_test = torch.utils.data.DataLoader(
+        dataset_test, batch_size=8, sampler=test_sampler, num_workers=args.workers, collate_fn=utils.collate_fn
+    )
+
     kwargs = {"trainable_backbone_layers": args.trainable_backbone_layers}
 
     if args.data_augmentation in ["multiscale", "lsj"]:
@@ -236,9 +239,6 @@ def main(args):
     ## Creating the student model
     backbone = resnet_fpn_backbone('resnet18', True)
     student1 = FasterRCNN(backbone, num_classes=91)
-    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/best_model.pth'
-    student1.load_state_dict(torch.load(checkpoint_path)["model"])
-
     ## Student 1 to CUDA
     student1.to(device)
 
@@ -264,7 +264,7 @@ def main(args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         ## Calling the train step
-        train_one_epoch(8, student1, optimizer_s1, data_loader, device, epoch, args.print_freq, scaler_s1)
+        train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, args.print_freq, scaler_s1)
         lr_scheduler_s1.step()
         if args.output_dir:
             ## Creating checkpoint
@@ -282,7 +282,7 @@ def main(args):
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
         # evaluate student1 after every epoch
-        # evaluate(student1, data_loader_test, device=device)
+        evaluate(student1, data_loader_test, device=device)
 
     ## Calculating training time
     total_time = time.time() - start_time
