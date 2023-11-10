@@ -10,6 +10,8 @@ from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
 from kornia.losses import ssim_loss
 from torchvision import transforms
+from coco_eval import CocoEvaluator
+from coco_utils import get_coco_api_from_dataset
 
 def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_freq, scaler_s1=None):
     # Setting students to evaluation mode
@@ -73,27 +75,25 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
       # Part 1: Individual SSIM Loss
       kd_loss_part_2 = 0
 
-      length = len(features_s1)
-
-      for i in range(length):
+      for i in range(2):
           kd_loss_part_1 += mse_loss(features_s1[i]['0'],features_t1[i]['0'])
-          kd_loss_part_1 += mse_loss(features_s1[i]['1'],features_t1[i]['1'])
-          kd_loss_part_1 += mse_loss(features_s1[i]['2'],features_t1[i]['2'])
-          kd_loss_part_1 += mse_loss(features_s1[i]['3'],features_t1[i]['3'])
+          kd_loss_part_1 += mse_loss(features_s1[i+1]['1'],features_t1[i]['1'])
+          kd_loss_part_1 += mse_loss(features_s1[i+2]['2'],features_t1[i]['2'])
+          kd_loss_part_1 += mse_loss(features_s1[i+3]['3'],features_t1[i]['3'])
 
-          kd_loss_part_1 += mse_loss(features_s1[i]['0'],features_t2[i]['0'])
-          kd_loss_part_1 += mse_loss(features_s1[i]['1'],features_t2[i]['1'])
-          kd_loss_part_1 += mse_loss(features_s1[i]['2'],features_t2[i]['2'])
+          kd_loss_part_1 += mse_loss(features_s1[i+4]['0'],features_t2[i]['0'])
+          kd_loss_part_1 += mse_loss(features_s1[i+5]['1'],features_t2[i]['1'])
+          kd_loss_part_1 += mse_loss(features_s1[i+6]['2'],features_t2[i]['2'])
           kd_loss_part_1 += mse_loss(features_s1[i]['3'],features_t2[i]['3'])
 
           kd_loss_part_2 += ssim_loss(features_s1[i]['0'],features_t1[i]['0'], window_size=11)
-          kd_loss_part_2 += ssim_loss(features_s1[i]['1'],features_t1[i]['1'], window_size=11)
-          kd_loss_part_2 += ssim_loss(features_s1[i]['2'],features_t1[i]['2'], window_size=11)
-          kd_loss_part_2 += ssim_loss(features_s1[i]['3'],features_t1[i]['3'], window_size=11)
+          kd_loss_part_2 += ssim_loss(features_s1[i+1]['1'],features_t1[i]['1'], window_size=11)
+          kd_loss_part_2 += ssim_loss(features_s1[i+2]['2'],features_t1[i]['2'], window_size=11)
+          kd_loss_part_2 += ssim_loss(features_s1[i+3]['3'],features_t1[i]['3'], window_size=11)
 
-          kd_loss_part_2 += ssim_loss(features_s1[i]['0'],features_t2[i]['0'], window_size=11)
-          kd_loss_part_2 += ssim_loss(features_s1[i]['1'],features_t2[i]['1'], window_size=11)
-          kd_loss_part_2 += ssim_loss(features_s1[i]['2'],features_t2[i]['2'], window_size=11)
+          kd_loss_part_2 += ssim_loss(features_s1[i+4]['0'],features_t2[i]['0'], window_size=11)
+          kd_loss_part_2 += ssim_loss(features_s1[i+5]['1'],features_t2[i]['1'], window_size=11)
+          kd_loss_part_2 += ssim_loss(features_s1[i+6]['2'],features_t2[i]['2'], window_size=11)
           kd_loss_part_2 += ssim_loss(features_s1[i]['3'],features_t2[i]['3'], window_size=11)
 
       # Part 2: Total SSIM Loss
@@ -140,3 +140,59 @@ def train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, print_fr
       metric_logger.update(lr=optimizer_s1.param_groups[0]["lr"])
 
     return metric_logger
+
+def _get_iou_types(model):
+    model_without_ddp = model
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        model_without_ddp = model.module
+    iou_types = ["bbox"]
+    if isinstance(model_without_ddp, torchvision.models.detection.MaskRCNN):
+        iou_types.append("segm")
+    if isinstance(model_without_ddp, torchvision.models.detection.KeypointRCNN):
+        iou_types.append("keypoints")
+    return iou_types
+
+
+@torch.inference_mode()
+def evaluate(model, data_loader, device):
+    n_threads = torch.get_num_threads()
+    # FIXME remove this and make paste_masks_in_image run on the GPU
+    torch.set_num_threads(1)
+    cpu_device = torch.device("cpu")
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = "Test:"
+
+    coco = get_coco_api_from_dataset(data_loader.dataset)
+    iou_types = _get_iou_types(model)
+    coco_evaluator = CocoEvaluator(coco, iou_types)
+
+    i = 0
+    for images, targets in metric_logger.log_every(data_loader, 100, header):
+      images = list(img.to(device) for img in images)
+
+      if torch.cuda.is_available():
+          torch.cuda.synchronize()
+      model_time = time.time()
+      outputs = model(images)
+
+      outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+      model_time = time.time() - model_time
+
+      res = {target["image_id"]: output for target, output in zip(targets, outputs)}
+      evaluator_time = time.time()
+      coco_evaluator.update(res)
+      evaluator_time = time.time() - evaluator_time
+      metric_logger.update(model_time=model_time, evaluator_time=evaluator_time)
+      i+=1
+
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    coco_evaluator.synchronize_between_processes()
+
+    # accumulate predictions from all images
+    coco_evaluator.accumulate()
+    coco_evaluator.summarize()
+    torch.set_num_threads(n_threads)
+    return coco_evaluator
