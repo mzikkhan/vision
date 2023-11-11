@@ -284,7 +284,7 @@ def main(args):
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
         # evaluate student1 after every epoch
-        evaluate(student1, data_loader_test, device=device)
+        # evaluate(student1, data_loader_test, device=device)
 
     ## Calculating training time
     total_time = time.time() - start_time
