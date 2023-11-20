@@ -239,6 +239,8 @@ def main(args):
     ## Creating the student model
     backbone = resnet_fpn_backbone('resnet18', True)
     student1 = FasterRCNN(backbone, num_classes=91)
+    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/best_model.pth'
+    student1.load_state_dict(torch.load(checkpoint_path)["model"])
     ## Student 1 to CUDA
     student1.to(device)
 
@@ -264,7 +266,7 @@ def main(args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         ## Calling the train step
-        train_one_epoch(student1, optimizer_s1, data_loader, device, epoch, args.print_freq, scaler_s1)
+        train_one_epoch(student1, optimizer_s1, data_loader_test, device, epoch, args.print_freq, scaler_s1)
         lr_scheduler_s1.step()
         if args.output_dir:
             ## Creating checkpoint
@@ -282,7 +284,7 @@ def main(args):
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
 
         # evaluate student1 after every epoch
-        evaluate(student1, data_loader_test, device=device)
+        # evaluate(student1, data_loader_test, device=device)
 
     ## Calculating training time
     total_time = time.time() - start_time

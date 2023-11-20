@@ -20,6 +20,7 @@ from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
 import tensorflow as tf
 from tensorflow.python import pywrap_tensorflow
+from torch.quantization import quantize_dynamic
 
 
 def copypaste_collate_fn(batch):
@@ -28,7 +29,7 @@ def copypaste_collate_fn(batch):
 
 
 def get_dataset(is_train, args):
-    image_set = "val" if is_train else "train"
+    image_set = "val" if is_train else "val"
     num_classes, mode = {"coco": (91, "instances"), "coco_kp": (2, "person_keypoints")}[args.dataset]
     with_masks = "mask" in args.student1
     ds = get_coco(
@@ -153,13 +154,16 @@ def main(args):
     backbone = resnet_fpn_backbone('resnet18', False)
     student1 = FasterRCNN(backbone, num_classes=91)
     checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/best_model.pth'
-    student1.load_state_dict(torch.load(checkpoint_path)["model"])
+    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+    student1.load_state_dict(checkpoint["model"]) 
+    # Quantize the model
+    student1 = quantize_dynamic(student1, dtype=torch.qint8) 
 
     ## Student 1 config
-    student1.to(device)
+    student1.to('cpu')
     start_time = time.time()
     print("Start testing")
-    evaluate(student1, data_loader_test, device=device)
+    evaluate(student1, data_loader_test, device='cpu')
 
     ## Calculating training time
     total_time = time.time() - start_time
