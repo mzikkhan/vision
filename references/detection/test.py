@@ -19,7 +19,6 @@ from transforms import SimpleCopyPaste
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
 import tensorflow as tf
-from tensorflow.python import pywrap_tensorflow
 from torch.quantization import quantize_dynamic
 
 
@@ -153,7 +152,7 @@ def main(args):
     ## Creating the models
     backbone = resnet_fpn_backbone('resnet18', False)
     student1 = FasterRCNN(backbone, num_classes=91)
-    checkpoint_path = '/content/drive/MyDrive/Colab Notebooks/best_model.pth'
+    checkpoint_path = '/content/drive/MyDrive/best_model.pth'
     checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
     student1.load_state_dict(checkpoint["model"]) 
     # Quantize the model
