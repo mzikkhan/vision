@@ -23,9 +23,9 @@ def copypaste_collate_fn(batch):
     copypaste = SimpleCopyPaste(blending=True, resize_interpolation=InterpolationMode.BILINEAR)
     return copypaste(*utils.collate_fn(batch))
 
-### Preparing the train and val sets
+# Preparing the train set
 def get_dataset(is_train, args):
-    image_set = "val" if is_train else "train"
+    image_set = "train" # use training set
     num_classes, mode = {"coco": (91, "instances"), "coco_kp": (2, "person_keypoints")}[args.dataset]
     with_masks = False
     ds = get_coco(
@@ -58,7 +58,7 @@ def get_args_parser(add_help=True):
     parser = argparse.ArgumentParser(description="PyTorch Detection Training: Ensemble Structural Knowledge Distillation", add_help=add_help)
 
     # Loading dataset
-    parser.add_argument("--data-path", default="/content/datasets/coco", type=str, help="dataset path")
+    parser.add_argument("--data-path", default="/kaggle/input/cocodatasets3/datasets/coco", type=str, help="dataset path")
     parser.add_argument(
         "--dataset",
         default="coco",
@@ -72,7 +72,7 @@ def get_args_parser(add_help=True):
     parser.add_argument(
         "-b", "--batch-size", default=2, type=int, help="images per gpu, the total batch size is $NGPU x batch_size"
     )
-    parser.add_argument("--epochs", default=5, type=int, metavar="N", help="number of total epochs to run")
+    parser.add_argument("--epochs", default=2, type=int, metavar="N", help="number of total epochs to run")
     parser.add_argument(
         "-j", "--workers", default=4, type=int, metavar="N", help="number of data loading workers (default: 4)"
     )
@@ -118,7 +118,7 @@ def get_args_parser(add_help=True):
     parser.add_argument("--print-freq", default=20, type=int, help="print frequency")
 
     ## Directory to save outputs
-    parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
+    parser.add_argument("--output-dir", default="/kaggle/working", type=str, help="path to save outputs")
     
     parser.add_argument("--resume", default="", type=str, help="path of checkpoint")
     parser.add_argument("--start_epoch", default=0, type=int, help="start epoch")
@@ -238,8 +238,8 @@ def main(args):
     ## Creating the student model
     backbone = resnet_fpn_backbone('resnet18', True)
     student1 = FasterRCNN(backbone, num_classes=91)
-    checkpoint_path = '/content/drive/MyDrive/best_model.pth'
-    student1.load_state_dict(torch.load(checkpoint_path)["model"])
+    # checkpoint_path = '/kaggle/working/best_model.pth'
+    # student1.load_state_dict(torch.load(checkpoint_path)["model"])
     ## Student 1 to CUDA
     student1.to(device)
 

@@ -2,7 +2,6 @@ r"""PyTorch Detection Structural Ensemble Knowledge Distillation."""
 import datetime
 import os
 import time
-
 import presets
 import torch
 import torch.utils.data
@@ -18,8 +17,7 @@ from torchvision.transforms import InterpolationMode
 from transforms import SimpleCopyPaste
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection import FasterRCNN
-import tensorflow as tf
-from torch.quantization import quantize_dynamic
+# from torch.quantization import quantize_dynamic
 
 
 def copypaste_collate_fn(batch):
@@ -28,7 +26,7 @@ def copypaste_collate_fn(batch):
 
 
 def get_dataset(is_train, args):
-    image_set = "val" if is_train else "val"
+    image_set = "val" # only use validation set
     num_classes, mode = {"coco": (91, "instances"), "coco_kp": (2, "person_keypoints")}[args.dataset]
     with_masks = "mask" in args.student1
     ds = get_coco(
@@ -61,7 +59,7 @@ def get_args_parser(add_help=True):
     parser = argparse.ArgumentParser(description="PyTorch Detection Testing: Ensemble Structural Knowledge Distillation", add_help=add_help)
 
     # Loading dataset
-    parser.add_argument("--data-path", default="/content/datasets/coco", type=str, help="dataset path")
+    parser.add_argument("--data-path", default="/kaggle/input/cocodatasets1/datasets/coco/val2014", type=str, help="dataset path")
     parser.add_argument(
         "--dataset",
         default="coco",
@@ -86,7 +84,7 @@ def get_args_parser(add_help=True):
     )
 
     ## Directory to save outputs
-    parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
+    parser.add_argument("--output-dir", default="/kaggle/working", type=str, help="path to save outputs")
 
     # distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
@@ -152,17 +150,17 @@ def main(args):
     ## Creating the models
     backbone = resnet_fpn_backbone('resnet18', False)
     student1 = FasterRCNN(backbone, num_classes=91)
-    checkpoint_path = '/content/drive/MyDrive/best_model.pth'
-    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))
+    checkpoint_path = '/kaggle/input/weights1/best_model.pth'
+    checkpoint = torch.load(checkpoint_path, map_location=torch.device('cuda:0'))
     student1.load_state_dict(checkpoint["model"]) 
     # Quantize the model
-    student1 = quantize_dynamic(student1, dtype=torch.qint8) 
+    # student1 = quantize_dynamic(student1, dtype=torch.qint8) 
 
     ## Student 1 config
-    student1.to('cpu')
+    student1.to('cuda:0')
     start_time = time.time()
     print("Start testing")
-    evaluate(student1, data_loader_test, device='cpu')
+    evaluate(student1, data_loader_test, device='cuda:0')
 
     ## Calculating training time
     total_time = time.time() - start_time
